@@ -22,7 +22,8 @@ public class Cliente {
                 }
 
                 System.out.print("Digite o valor: > ");
-                Double valor = new Double(teclado.readLine());
+                String valorDigitado = teclado.readLine().replace(",", ".");
+                Double valor = Double.valueOf(valorDigitado);
 
                 Pedido pedido = new Pedido(cpf, valor);
                 saida.writeObject(pedido);
