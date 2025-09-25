@@ -11,7 +11,7 @@ public class App {
                  Thread.sleep(2000); // Novo cliente a cada 2 segundos
             }
            catch(InterruptedException e){
-                e.printStackTrace();;
+                e.printStackTrace();
             }
         }
     }
