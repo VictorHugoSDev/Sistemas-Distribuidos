@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="pt-br">
+
+<head>
+  <title>Chat STOMP</title>
+  <style>
+    body {
+      font-family: system-ui, Arial;
+      max-width: 1000px;
+      margin: 2rem auto;
+      display: flex;
+      gap: 20px;
+    }
+
+    .chat-container {
+      flex-grow: 1;
+      min-width: 400px;
+    }
+
+    .presence-area {
+      width: 250px;
+      padding: 10px;
+      border: 1px solid #ddd;
+      background-color: #f9f9f9;
+      height: fit-content;
+    }
+
+    .row {
+      display: flex;
+      gap: .5rem;
+      margin: .5rem 0;
+    }
+
+    input,
+    button,
+    select {
+      padding: .5rem;
+    }
+
+    #message,
+    #privateMessage {
+      flex-grow: 1;
+    }
+
+    #userDmSelect {
+      flex-grow: 1;
+    }
+
+    #log {
+      border: 1px solid #ddd;
+      padding: 1rem;
+      height: 320px;
+      overflow: auto;
+    }
+
+    #onlineUserList {
+      list-style-type: none;
+      padding-left: 0;
+      margin-top: 5px;
+    }
+
+    small {
+      color: #666;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="chat-container">
+    <h2>Chat em tempo real (Spring + STOMP)</h2>
+
+    <div class="row">
+      <input id="username" placeholder="Seu nome" />
+      <button id="connectBtn">Conectar</button>
+      <button id="disconnectBtn" disabled>Desconectar</button>
+    </div>
+
+    <div class="row">
+      <input id="message" placeholder="Mensagem publica" />
+      <button id="sendPublicBtn" disabled>Enviar publico</button>
+    </div>
+
+    <div id="log"></div>
+
+    <h4 style="margin-top: 20px;">Mensagem Privada (DM)</h4>
+    <div class="row">
+      <select id="userDmSelect">
+        <option value="">-- Selecione o Destinatario --</option>
+      </select>
+    </div>
+    <div class="row">
+      <input id="privateMessage" placeholder="Mensagem privada" />
+      <button id="sendPrivateBtn" disabled>Enviar DM</button>
+    </div>
+  </div>
+
+  <div class="presence-area">
+    <h4>Usuarios Online: <span id="onlineUserCont">0</span></h4>
+    <ul id="onlineUserList">
+    </ul>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/stompjs@2.3.3/lib/stomp.min.js"></script>
+  <script>
+    let stomp = null;
+    let connected = false;
+    let privateSubscription = null;
+
+    const log = (m) => {
+      const el = document.getElementById('log');
+      const p = document.createElement('div');
+      p.innerHTML = m;
+      el.appendChild(p);
+      el.scrollTop = el.scrollHeight;
+    };
+
+    function connect() {
+      const user = document.getElementById('username').value?.trim();
+      if (!user) { alert('Informe seu nome'); return; }
+
+      const wsUrl = "ws://localhost:8080/ws";
+      const ws = new WebSocket(wsUrl);
+      stomp = Stomp.over(ws);
+
+      stomp.connect({}, () => {
+        connected = true;
+        document.getElementById('connectBtn').disabled = true;
+        document.getElementById('disconnectBtn').disabled = false;
+        document.getElementById('sendPublicBtn').disabled = false;
+        document.getElementById('sendPrivateBtn').disabled = false;
+
+        stomp.subscribe('/topic/public', frame => {
+          const msg = JSON.parse(frame.body);
+          log(`<b>[${msg.tipoMensagem}]</b> ${msg.origem ?? ''}: ${msg.texto} <small>${msg.dataHora}</small>`);
+        });
+
+        stomp.subscribe('/topic/online', frame => {
+          const users = JSON.parse(frame.body);
+          const userListEl = document.getElementById('onlineUserList');
+          const dmSelect = document.getElementById('userDmSelect');
+
+          userListEl.innerHTML = '';
+          dmSelect.innerHTML = '<option value="">-- Selecione o Destinatario --</option>';
+
+          users.forEach(username => {
+            const li = document.createElement('li');
+            li.textContent = username;
+            userListEl.appendChild(li);
+
+            if (username !== user) {
+              const option = document.createElement('option');
+              option.value = username;
+              option.textContent = username;
+              dmSelect.appendChild(option);
+            }
+          });
+
+          document.getElementById('onlineUserCont').textContent = users.length;
+        });
+
+        const privateTopic = '/topic/dm.' + user;
+        privateSubscription = stomp.subscribe(privateTopic, frame => {
+          const msg = JSON.parse(frame.body);
+          log(`<span style="color: blue;"><b>[DM de ${msg.origem}]</b>: ${msg.texto}</span> <small>${msg.dataHora}</small>`);
+        });
+
+        stomp.send('/app/chat.join', {}, JSON.stringify({ origem: user }));
+        log(`<i>Conectado como ${user}</i>`);
+      }, (err) => {
+        log(`<span style="color:#c00">Erro de conexao: ${err}</span>`);
+      });
+    }
+
+    function disconnect() {
+      if (stomp && connected) {
+        const user = document.getElementById('username').value?.trim();
+
+        stomp.send('/app/chat.leave', {}, JSON.stringify({ origem: user }));
+
+        if (privateSubscription) {
+          privateSubscription.unsubscribe();
+        }
+
+        stomp.disconnect(() => {
+          log('<i>Desconectado </i>')
+          connected = false;
+          document.getElementById('connectBtn').disabled = false;
+          document.getElementById('disconnectBtn').disabled = true;
+          document.getElementById('sendPublicBtn').disabled = true;
+          document.getElementById('sendPrivateBtn').disabled = true;
+          document.getElementById('onlineUserList').innerHTML = '';
+          document.getElementById('onlineUserCont').textContent = '0';
+          document.getElementById('userDmSelect').innerHTML = '<option value="">-- Selecione o Destinatario --</option>';
+        });
+      }
+    }
+
+    function sendPublic() {
+      const user = document.getElementById('username').value?.trim();
+      const texto = document.getElementById('message').value?.trim();
+      if (!texto) return;
+      stomp.send('/app/chat.send', {}, JSON.stringify({ origem: user, texto }));
+      document.getElementById('message').value = '';
+    }
+
+    function sendPrivate() {
+      const user = document.getElementById('username').value?.trim();
+      const texto = document.getElementById('privateMessage').value?.trim();
+      const destino = document.getElementById('userDmSelect').value?.trim();
+
+      if (!texto || !destino) {
+        alert('Selecione um destinatario e digite uma mensagem.');
+        return;
+      }
+
+      const privateMsg = {
+        origem: user,
+        texto: texto,
+        destino: destino
+      };
+
+      stomp.send('/app/chat.private', {}, JSON.stringify(privateMsg));
+
+      log(`<span style="color: blue;"><i>[DM para ${destino}]</i>: ${texto}</span>`);
+
+      document.getElementById('privateMessage').value = '';
+    }
+
+    document.getElementById('connectBtn').onclick = connect;
+    document.getElementById('disconnectBtn').onclick = disconnect;
+    document.getElementById('sendPublicBtn').onclick = sendPublic;
+    document.getElementById('sendPrivateBtn').onclick = sendPrivate;
+  </script>
+</body>
+
+</html>
